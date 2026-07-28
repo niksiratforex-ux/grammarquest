@@ -34,15 +34,42 @@ export async function initDatabase() {
       max_hp      INTEGER DEFAULT 100,
       attack      INTEGER DEFAULT 10,
       defense     INTEGER DEFAULT 5,
+      crit_chance INTEGER DEFAULT 5,
       dungeon_floor   INTEGER DEFAULT 0,
       dungeon_room    INTEGER DEFAULT 0,
-      inventory   TEXT DEFAULT '[]',
+      equipped_weapon TEXT DEFAULT '',
+      equipped_armor  TEXT DEFAULT '',
       wins        INTEGER DEFAULT 0,
       losses      INTEGER DEFAULT 0,
       streak      INTEGER DEFAULT 0,
       best_streak INTEGER DEFAULT 0,
+      monsters_killed INTEGER DEFAULT 0,
+      daily_challenge_id TEXT DEFAULT '',
+      daily_progress INTEGER DEFAULT 0,
+      daily_completed INTEGER DEFAULT 0,
+      last_daily_date TEXT DEFAULT '',
       created_at  TEXT DEFAULT (datetime('now')),
       updated_at  TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS inventory (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL,
+      item_id     TEXT NOT NULL,
+      quantity    INTEGER DEFAULT 1,
+      UNIQUE(user_id, item_id)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS achievements (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL,
+      achievement_id TEXT NOT NULL,
+      earned_at   TEXT DEFAULT (datetime('now')),
+      UNIQUE(user_id, achievement_id)
     )
   `);
 
@@ -73,7 +100,7 @@ function saveDB() {
   writeFileSync(DB_PATH, buffer);
 }
 
-// ── Helper: run query and return rows ──────────────────
+// ── Helper functions ───────────────────────────────────
 
 function queryAll(sql, params = []) {
   const stmt = db.prepare(sql);
@@ -164,12 +191,94 @@ export function setPlayerAttack(userId, attack) {
   run("UPDATE players SET attack = ?, updated_at = datetime('now') WHERE user_id = ?", [attack, userId]);
 }
 
+export function incrementMonsterKill(userId) {
+  run("UPDATE players SET monsters_killed = monsters_killed + 1 WHERE user_id = ?", [userId]);
+}
+
+// ── Equipment ──────────────────────────────────────────
+
+export function equipItem(userId, slot, itemId) {
+  const col = slot === "weapon" ? "equipped_weapon" : "equipped_armor";
+  run(`UPDATE players SET ${col} = ?, updated_at = datetime('now') WHERE user_id = ?`, [itemId, userId]);
+}
+
+// ── Inventory ──────────────────────────────────────────
+
+export function addToInventory(userId, itemId, quantity = 1) {
+  const existing = queryOne("SELECT * FROM inventory WHERE user_id = ? AND item_id = ?", [userId, itemId]);
+  if (existing) {
+    run("UPDATE inventory SET quantity = quantity + ? WHERE user_id = ? AND item_id = ?", [quantity, userId, itemId]);
+  } else {
+    run("INSERT INTO inventory (user_id, item_id, quantity) VALUES (?, ?, ?)", [userId, itemId, quantity]);
+  }
+}
+
+export function removeFromInventory(userId, itemId, quantity = 1) {
+  const existing = queryOne("SELECT * FROM inventory WHERE user_id = ? AND item_id = ?", [userId, itemId]);
+  if (!existing || existing.quantity < quantity) return false;
+  if (existing.quantity === quantity) {
+    run("DELETE FROM inventory WHERE user_id = ? AND item_id = ?", [userId, itemId]);
+  } else {
+    run("UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND item_id = ?", [quantity, userId, itemId]);
+  }
+  return true;
+}
+
+export function getInventory(userId) {
+  return queryAll("SELECT * FROM inventory WHERE user_id = ?", [userId]);
+}
+
+// ── Achievements ───────────────────────────────────────
+
+export function earnAchievement(userId, achievementId) {
+  try {
+    run("INSERT OR IGNORE INTO achievements (user_id, achievement_id) VALUES (?, ?)", [userId, achievementId]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function getEarnedAchievements(userId) {
+  return queryAll("SELECT achievement_id FROM achievements WHERE user_id = ?", [userId]).map(r => r.achievement_id);
+}
+
+// ── Daily Challenge ────────────────────────────────────
+
+export function updateDailyProgress(userId, challengeId, progress, date) {
+  run(
+    "UPDATE players SET daily_challenge_id = ?, daily_progress = ?, last_daily_date = ?, updated_at = datetime('now') WHERE user_id = ?",
+    [challengeId, progress, date, userId]
+  );
+}
+
+export function completeDaily(userId) {
+  run("UPDATE players SET daily_completed = 1, updated_at = datetime('now') WHERE user_id = ?", [userId]);
+}
+
+export function resetDaily(userId, challengeId, date) {
+  run(
+    "UPDATE players SET daily_challenge_id = ?, daily_progress = 0, daily_completed = 0, last_daily_date = ?, updated_at = datetime('now') WHERE user_id = ?",
+    [challengeId, date, userId]
+  );
+}
+
+// ── Leaderboard ────────────────────────────────────────
+
 export function getTopPlayers() {
   return queryAll("SELECT user_id, username, first_name, level, xp, coins, wins, streak FROM players ORDER BY xp DESC LIMIT 20");
 }
 
 export function getTopStreaks() {
   return queryAll("SELECT user_id, username, first_name, level, streak FROM players WHERE streak > 0 ORDER BY streak DESC LIMIT 10");
+}
+
+export function getTopMonsters() {
+  return queryAll("SELECT user_id, username, first_name, monsters_killed FROM players WHERE monsters_killed > 0 ORDER BY monsters_killed DESC LIMIT 10");
+}
+
+export function addDefense(userId, amount) {
+  run("UPDATE players SET defense = defense + ? WHERE user_id = ?", [amount, userId]);
 }
 
 export { db };
