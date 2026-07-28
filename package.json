@@ -1,0 +1,15 @@
+{
+  "name": "grammarquest",
+  "version": "1.0.0",
+  "description": "⚔️ GrammarQuest — Vocab Clash + Grammar Dungeon RPG Telegram Bot",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.16.3",
+    "sql.js": "^1.11.0"
+  }
+}
